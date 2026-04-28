@@ -498,44 +498,96 @@ Key things to inspect, verify or ask about for this specific car.
 
 Be direct, honest and practical. UK market only.`;
 
-function FairPriceChecker() {
-  const [listing, setListing] = useState('');
-  const [make,    setMake]    = useState('');
-  const [model,   setModel]   = useState('');
-  const [year,    setYear]    = useState('');
-  const [mileage, setMileage] = useState('');
-  const [price,   setPrice]   = useState('');
-  const [seller,  setSeller]  = useState('');
-  const [extras,  setExtras]  = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result,  setResult]  = useState('');
-  const [error,   setError]   = useState('');
+const SYS_PHOTO_PRICE = `You are a UK used car valuation expert. Analyse the car photo provided.
 
-  const urlMode = isUrl(listing.trim());
+Format your response with exactly these sections:
+## 🚗 Vehicle Identified
+Make, model, approximate year, and trim level based on what you can see.
+
+## 🔍 Condition Assessment
+Rate as Excellent / Good / Fair / Poor with a brief explanation of visible condition factors.
+
+## 💷 Estimated Market Value (UK)
+Realistic price range in £ (e.g. £8,500 — £11,200). Explain what drives the range.
+
+## 📊 Key Factors Affecting Price
+Bullet list of what's pushing the value up or down based on the photo.
+
+## 💡 Buying / Selling Tip
+One specific, actionable tip for someone buying or selling this car.
+
+Be honest, realistic, and UK-market focused.`;
+
+function FairPriceChecker() {
+  const [tab,         setTab]         = useState('text');
+  // text tab
+  const [listing,     setListing]     = useState('');
+  const [make,        setMake]        = useState('');
+  const [model,       setModel]       = useState('');
+  const [year,        setYear]        = useState('');
+  const [mileage,     setMileage]     = useState('');
+  const [price,       setPrice]       = useState('');
+  const [seller,      setSeller]      = useState('');
+  const [extras,      setExtras]      = useState('');
+  // photo tab
+  const [imgData,     setImgData]     = useState(null);
+  const [preview,     setPreview]     = useState('');
+  const [dragging,    setDragging]    = useState(false);
+  const [photoExtras, setPhotoExtras] = useState('');
+  // shared
+  const [loading,     setLoading]     = useState(false);
+  const [result,      setResult]      = useState('');
+  const [error,       setError]       = useState('');
+  const fileRef = useRef(null);
+
+  const urlMode = tab === 'text' && isUrl(listing.trim());
 
   function resetResult() { setResult(''); setError(''); }
 
+  function switchTab(t) { setTab(t); resetResult(); }
+
+  async function handleFile(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    setImgData(await toBase64(file));
+    setPreview(URL.createObjectURL(file));
+    resetResult();
+  }
+
+  function onDrop(e) { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }
+  function clearPhoto() { setImgData(null); setPreview(''); resetResult(); }
+
   const canSubmit = !loading && (
-    urlMode ? !!(make || model) && !!price : listing.trim().length >= 20
+    tab === 'photo'
+      ? !!imgData
+      : urlMode ? !!(make || model) && !!price : listing.trim().length >= 20
   );
 
   async function submit() {
     setLoading(true); setError(''); setResult('');
     try {
-      let prompt;
-      if (urlMode) {
-        const lines = ['Car listing details:'];
-        const car = [year, make, model].filter(Boolean).join(' ');
-        if (car)     lines.push(`Car: ${car}`);
-        if (mileage) lines.push(`Mileage: ${mileage} miles`);
-        if (price)   lines.push(`Asking price: £${price}`);
-        if (seller)  lines.push(`Seller type: ${seller}`);
-        if (extras)  lines.push(`Additional details: ${extras}`);
-        prompt = lines.join('\n');
+      if (tab === 'photo') {
+        const text = `Analyse this car photo and provide a UK market valuation.${photoExtras ? ` Additional details: ${photoExtras}` : ''}`;
+        const messages = [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: imgData.mediaType, data: imgData.base64 } },
+          { type: 'text', text },
+        ]}];
+        setResult(await callClaude(messages, SYS_PHOTO_PRICE));
       } else {
-        prompt = `Car listing:\n\n${listing}`;
+        let prompt;
+        if (urlMode) {
+          const lines = ['Car listing details:'];
+          const car = [year, make, model].filter(Boolean).join(' ');
+          if (car)     lines.push(`Car: ${car}`);
+          if (mileage) lines.push(`Mileage: ${mileage} miles`);
+          if (price)   lines.push(`Asking price: £${price}`);
+          if (seller)  lines.push(`Seller type: ${seller}`);
+          if (extras)  lines.push(`Additional details: ${extras}`);
+          prompt = lines.join('\n');
+        } else {
+          prompt = `Car listing:\n\n${listing}`;
+        }
+        setResult(await callClaude([{ role: 'user', content: prompt }], SYS_PRICE));
       }
-      setResult(await callClaude([{ role: 'user', content: prompt }], SYS_PRICE));
     } catch (e) { setError(e.message || 'Something went wrong. Please try again.'); }
     finally { setLoading(false); }
   }
@@ -544,96 +596,106 @@ function FairPriceChecker() {
     <div>
       <div className="tool-header">
         <div className="tool-title">Fair Price Checker</div>
-        <div className="tool-desc">Paste any UK car listing text — or a URL to get a structured entry form.</div>
+        <div className="tool-desc">Value a car from a listing or a photo.</div>
       </div>
       <div className="card">
-        <div className="field">
-          <label className="field-label">Listing Text or URL</label>
-          <textarea
-            className="textarea"
-            style={{ minHeight: urlMode ? 52 : 180, transition: 'min-height 0.2s ease' }}
-            value={listing}
-            onChange={e => { setListing(e.target.value); resetResult(); }}
-            placeholder={`Paste listing text OR an AutoTrader / eBay Motors URL\n\nExample:\n2019 Ford Focus ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995. One owner.`}
-          />
+        <div className="mode-tabs">
+          <button className={`mode-tab ${tab === 'text'  ? 'active' : ''}`} onClick={() => switchTab('text')}>📋 Text Details</button>
+          <button className={`mode-tab ${tab === 'photo' ? 'active' : ''}`} onClick={() => switchTab('photo')}>📷 Photo Valuation</button>
         </div>
 
-        {!urlMode && (
-          <button className="btn btn-primary btn-full" onClick={submit} disabled={!canSubmit}>
-            {loading ? 'Checking…' : 'Check This Price →'}
-          </button>
+        {tab === 'text' && (
+          <>
+            <div className="field">
+              <label className="field-label">Listing Text or URL</label>
+              <textarea
+                className="textarea"
+                style={{ minHeight: urlMode ? 52 : 180, transition: 'min-height 0.2s ease' }}
+                value={listing}
+                onChange={e => { setListing(e.target.value); resetResult(); }}
+                placeholder={`Paste listing text OR an AutoTrader / eBay Motors URL\n\nExample:\n2019 Ford Focus ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995. One owner.`}
+              />
+            </div>
+
+            {!urlMode && (
+              <button className="btn btn-primary btn-full" onClick={submit} disabled={!canSubmit}>
+                {loading ? 'Checking…' : 'Check This Price →'}
+              </button>
+            )}
+
+            {urlMode && (
+              <div style={{ marginTop: 16, padding: '18px 20px', background: 'rgba(255,149,0,0.07)', border: '1px solid rgba(255,149,0,0.28)', borderRadius: 12 }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 18 }}>
+                  <span style={{ fontSize: 20, lineHeight: 1 }}>🔒</span>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>AutoTrader listings can&apos;t be read directly</div>
+                    <div style={{ color: 'var(--muted2)', fontSize: 13 }}>Copy and paste these details from the listing:</div>
+                  </div>
+                </div>
+                <div className="field-row field-row-3" style={{ marginBottom: 12 }}>
+                  <div className="field"><label className="field-label">Make</label>
+                    <input className="input" placeholder="e.g. BMW"  value={make}  onChange={e => setMake(e.target.value)} /></div>
+                  <div className="field"><label className="field-label">Model</label>
+                    <input className="input" placeholder="e.g. 320d" value={model} onChange={e => setModel(e.target.value)} /></div>
+                  <div className="field"><label className="field-label">Year</label>
+                    <input className="input" placeholder="e.g. 2020" value={year}  onChange={e => setYear(e.target.value)} /></div>
+                </div>
+                <div className="field-row field-row-2" style={{ marginBottom: 12 }}>
+                  <div className="field"><label className="field-label">Mileage</label>
+                    <input className="input" placeholder="e.g. 38000" value={mileage} onChange={e => setMileage(e.target.value)} /></div>
+                  <div className="field"><label className="field-label">Asking Price (£) *</label>
+                    <input className="input" placeholder="e.g. 14995" value={price}   onChange={e => setPrice(e.target.value)} /></div>
+                </div>
+                <div className="field" style={{ marginBottom: 12 }}>
+                  <label className="field-label">Seller Type</label>
+                  <div className="toggle-group">
+                    {['Private', 'Dealer'].map(s => (
+                      <button key={s} className={`toggle-btn ${seller === s ? 'active-green' : ''}`}
+                        onClick={() => setSeller(seller === s ? '' : s)}>{s}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field" style={{ marginBottom: 16 }}>
+                  <label className="field-label">Any Extras (optional)</label>
+                  <input className="input" placeholder="e.g. Full service history, 2 owners, MOT June 2026, no accidents"
+                    value={extras} onChange={e => setExtras(e.target.value)} />
+                </div>
+                <button className="btn btn-primary btn-full" style={{ marginTop: 0 }} onClick={submit} disabled={!canSubmit}>
+                  {loading ? 'Checking…' : 'Check This Price →'}
+                </button>
+              </div>
+            )}
+          </>
         )}
 
-        {urlMode && (
-          <div style={{
-            marginTop: 16,
-            padding: '18px 20px',
-            background: 'rgba(255,149,0,0.07)',
-            border: '1px solid rgba(255,149,0,0.28)',
-            borderRadius: 12,
-          }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 18 }}>
-              <span style={{ fontSize: 20, lineHeight: 1 }}>🔒</span>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>
-                  AutoTrader listings can&apos;t be read directly
+        {tab === 'photo' && (
+          <>
+            {preview
+              ? <div className="upload-preview">
+                  <img src={preview} alt="Car for valuation" />
+                  <button className="upload-clear" onClick={clearPhoto}>✕ Remove</button>
                 </div>
-                <div style={{ color: 'var(--muted2)', fontSize: 13 }}>
-                  Copy and paste these details from the listing:
+              : <div className={`upload-zone ${dragging ? 'dragging' : ''}`}
+                  onClick={() => fileRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={onDrop}>
+                  <div className="upload-zone-icon">📷</div>
+                  <div className="upload-zone-text">Drop a photo or tap to upload</div>
+                  <div className="upload-zone-hint">Works best with a clear exterior shot showing the whole car</div>
+                  <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+                    onChange={e => handleFile(e.target.files[0])} />
                 </div>
-              </div>
-            </div>
-
-            <div className="field-row field-row-3" style={{ marginBottom: 12 }}>
-              <div className="field">
-                <label className="field-label">Make</label>
-                <input className="input" placeholder="e.g. BMW" value={make} onChange={e => setMake(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label">Model</label>
-                <input className="input" placeholder="e.g. 320d" value={model} onChange={e => setModel(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label">Year</label>
-                <input className="input" placeholder="e.g. 2020" value={year} onChange={e => setYear(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="field-row field-row-2" style={{ marginBottom: 12 }}>
-              <div className="field">
-                <label className="field-label">Mileage</label>
-                <input className="input" placeholder="e.g. 38000" value={mileage} onChange={e => setMileage(e.target.value)} />
-              </div>
-              <div className="field">
-                <label className="field-label">Asking Price (£) *</label>
-                <input className="input" placeholder="e.g. 14995" value={price} onChange={e => setPrice(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="field" style={{ marginBottom: 12 }}>
-              <label className="field-label">Seller Type</label>
-              <div className="toggle-group">
-                {['Private', 'Dealer'].map(s => (
-                  <button key={s}
-                    className={`toggle-btn ${seller === s ? 'active-green' : ''}`}
-                    onClick={() => setSeller(seller === s ? '' : s)}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+            }
             <div className="field" style={{ marginBottom: 16 }}>
-              <label className="field-label">Any Extras (optional)</label>
-              <input className="input"
-                placeholder="e.g. Full service history, 2 owners, MOT June 2026, no accidents"
-                value={extras} onChange={e => setExtras(e.target.value)} />
+              <label className="field-label">Any extra details? (optional)</label>
+              <input className="input" placeholder="e.g. 54,000 miles, Manchester, private sale, full history"
+                value={photoExtras} onChange={e => setPhotoExtras(e.target.value)} />
             </div>
-
-            <button className="btn btn-primary btn-full" style={{ marginTop: 0 }} onClick={submit} disabled={!canSubmit}>
-              {loading ? 'Checking…' : 'Check This Price →'}
+            <button className="btn btn-primary btn-full" onClick={submit} disabled={!canSubmit}>
+              {loading ? 'Valuing…' : 'Estimate This Car\'s Value →'}
             </button>
-          </div>
+          </>
         )}
       </div>
       <ResultCard content={result} loading={loading} error={error} />
