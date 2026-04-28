@@ -500,21 +500,42 @@ Be direct, honest and practical. UK market only.`;
 
 function FairPriceChecker() {
   const [listing, setListing] = useState('');
+  const [make,    setMake]    = useState('');
+  const [model,   setModel]   = useState('');
+  const [year,    setYear]    = useState('');
+  const [mileage, setMileage] = useState('');
+  const [price,   setPrice]   = useState('');
+  const [seller,  setSeller]  = useState('');
+  const [extras,  setExtras]  = useState('');
   const [loading, setLoading] = useState(false);
   const [result,  setResult]  = useState('');
   const [error,   setError]   = useState('');
 
   const urlMode = isUrl(listing.trim());
 
+  function resetResult() { setResult(''); setError(''); }
+
+  const canSubmit = !loading && (
+    urlMode ? !!(make || model) && !!price : listing.trim().length >= 20
+  );
+
   async function submit() {
     setLoading(true); setError(''); setResult('');
     try {
+      let prompt;
       if (urlMode) {
-        const prompt = `Please fetch and analyse this car listing: ${listing.trim()}\n\nThen provide your full price analysis verdict.`;
-        setResult(await callClaude([{ role: 'user', content: prompt }], SYS_PRICE, { useWebSearch: true }));
+        const lines = ['Car listing details:'];
+        const car = [year, make, model].filter(Boolean).join(' ');
+        if (car)     lines.push(`Car: ${car}`);
+        if (mileage) lines.push(`Mileage: ${mileage} miles`);
+        if (price)   lines.push(`Asking price: £${price}`);
+        if (seller)  lines.push(`Seller type: ${seller}`);
+        if (extras)  lines.push(`Additional details: ${extras}`);
+        prompt = lines.join('\n');
       } else {
-        setResult(await callClaude([{ role: 'user', content: `Car listing:\n\n${listing}` }], SYS_PRICE));
+        prompt = `Car listing:\n\n${listing}`;
       }
+      setResult(await callClaude([{ role: 'user', content: prompt }], SYS_PRICE));
     } catch (e) { setError(e.message || 'Something went wrong. Please try again.'); }
     finally { setLoading(false); }
   }
@@ -523,24 +544,97 @@ function FairPriceChecker() {
     <div>
       <div className="tool-header">
         <div className="tool-title">Fair Price Checker</div>
-        <div className="tool-desc">Paste any UK car listing text or an AutoTrader / eBay Motors URL.</div>
+        <div className="tool-desc">Paste any UK car listing text — or a URL to get a structured entry form.</div>
       </div>
       <div className="card">
         <div className="field">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <label className="field-label">Listing Text or URL *</label>
-            {urlMode && (
-              <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 500 }}>
-                🌐 URL detected — will search live
-              </span>
-            )}
-          </div>
-          <textarea className="textarea" style={{ minHeight: 180 }} value={listing} onChange={e => setListing(e.target.value)}
-            placeholder={`Paste listing text OR an AutoTrader / eBay Motors URL\n\nExamples:\n• https://www.autotrader.co.uk/car-details/...\n• 2019 Ford Focus 1.0 EcoBoost ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995…`} />
+          <label className="field-label">Listing Text or URL</label>
+          <textarea
+            className="textarea"
+            style={{ minHeight: urlMode ? 52 : 180, transition: 'min-height 0.2s ease' }}
+            value={listing}
+            onChange={e => { setListing(e.target.value); resetResult(); }}
+            placeholder={`Paste listing text OR an AutoTrader / eBay Motors URL\n\nExample:\n2019 Ford Focus ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995. One owner.`}
+          />
         </div>
-        <button className="btn btn-primary btn-full" onClick={submit} disabled={listing.trim().length < 10 || loading}>
-          {loading ? (urlMode ? 'Fetching listing…' : 'Checking…') : 'Check This Price →'}
-        </button>
+
+        {!urlMode && (
+          <button className="btn btn-primary btn-full" onClick={submit} disabled={!canSubmit}>
+            {loading ? 'Checking…' : 'Check This Price →'}
+          </button>
+        )}
+
+        {urlMode && (
+          <div style={{
+            marginTop: 16,
+            padding: '18px 20px',
+            background: 'rgba(255,149,0,0.07)',
+            border: '1px solid rgba(255,149,0,0.28)',
+            borderRadius: 12,
+          }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 18 }}>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>🔒</span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>
+                  AutoTrader listings can&apos;t be read directly
+                </div>
+                <div style={{ color: 'var(--muted2)', fontSize: 13 }}>
+                  Copy and paste these details from the listing:
+                </div>
+              </div>
+            </div>
+
+            <div className="field-row field-row-3" style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label className="field-label">Make</label>
+                <input className="input" placeholder="e.g. BMW" value={make} onChange={e => setMake(e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="field-label">Model</label>
+                <input className="input" placeholder="e.g. 320d" value={model} onChange={e => setModel(e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="field-label">Year</label>
+                <input className="input" placeholder="e.g. 2020" value={year} onChange={e => setYear(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="field-row field-row-2" style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label className="field-label">Mileage</label>
+                <input className="input" placeholder="e.g. 38000" value={mileage} onChange={e => setMileage(e.target.value)} />
+              </div>
+              <div className="field">
+                <label className="field-label">Asking Price (£) *</label>
+                <input className="input" placeholder="e.g. 14995" value={price} onChange={e => setPrice(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label className="field-label">Seller Type</label>
+              <div className="toggle-group">
+                {['Private', 'Dealer'].map(s => (
+                  <button key={s}
+                    className={`toggle-btn ${seller === s ? 'active-green' : ''}`}
+                    onClick={() => setSeller(seller === s ? '' : s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label className="field-label">Any Extras (optional)</label>
+              <input className="input"
+                placeholder="e.g. Full service history, 2 owners, MOT June 2026, no accidents"
+                value={extras} onChange={e => setExtras(e.target.value)} />
+            </div>
+
+            <button className="btn btn-primary btn-full" style={{ marginTop: 0 }} onClick={submit} disabled={!canSubmit}>
+              {loading ? 'Checking…' : 'Check This Price →'}
+            </button>
+          </div>
+        )}
       </div>
       <ResultCard content={result} loading={loading} error={error} />
     </div>
