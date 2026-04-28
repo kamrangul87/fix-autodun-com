@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { supabase } from './lib/supabase';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -88,10 +89,20 @@ function parseMd(raw) {
 
 // ── Shared Components ──────────────────────────────────────────────────────
 
-function FeedbackBar() {
+function FeedbackBar({ tool, resultSummary }) {
   const [rating,  setRating]  = useState(null);
   const [comment, setComment] = useState('');
   const [done,    setDone]    = useState(false);
+
+  async function send(finalRating, finalComment) {
+    setDone(true);
+    await supabase.from('fix_feedback').insert({
+      tool,
+      vote:           finalRating,
+      note:           finalComment || null,
+      result_summary: resultSummary ? resultSummary.slice(0, 200) : null,
+    });
+  }
 
   if (done) {
     return <div className="feedback-bar feedback-done">✓ Thanks for your feedback!</div>;
@@ -99,20 +110,23 @@ function FeedbackBar() {
   return (
     <div className="feedback-bar">
       <span>Was this helpful? Your feedback trains the Autodun AI</span>
-      <button className={`fb-btn ${rating === 'up'   ? 'fb-up-active'   : ''}`} onClick={() => setRating(rating === 'up'   ? null : 'up')}>👍</button>
-      <button className={`fb-btn ${rating === 'down' ? 'fb-down-active' : ''}`} onClick={() => setRating(rating === 'down' ? null : 'down')}>👎</button>
+      <button className={`fb-btn ${rating === 'up'   ? 'fb-up-active'   : ''}`}
+        onClick={() => setRating(rating === 'up' ? null : 'up')}>👍</button>
+      <button className={`fb-btn ${rating === 'down' ? 'fb-down-active' : ''}`}
+        onClick={() => setRating(rating === 'down' ? null : 'down')}>👎</button>
       {rating && (
         <>
           <input className="fb-input" type="text" placeholder="Optional comment…" value={comment}
-            onChange={e => setComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && setDone(true)} />
-          <button className="fb-send" onClick={() => setDone(true)}>Send</button>
+            onChange={e => setComment(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && send(rating, comment)} />
+          <button className="fb-send" onClick={() => send(rating, comment)}>Send</button>
         </>
       )}
     </div>
   );
 }
 
-function ResultCard({ content, loading, error, plain, actions }) {
+function ResultCard({ content, loading, error, plain, actions, tool }) {
   if (loading) return <div className="result-loading"><div className="spinner" /><span>Analysing…</span></div>;
   if (error)   return <div className="error-box">⚠️ {error}</div>;
   if (!content) return null;
@@ -124,7 +138,7 @@ function ResultCard({ content, loading, error, plain, actions }) {
           : <div dangerouslySetInnerHTML={{ __html: parseMd(content) }} />}
       </div>
       {actions && <div className="result-actions">{actions}</div>}
-      <FeedbackBar />
+      <FeedbackBar tool={tool} resultSummary={content} />
     </div>
   );
 }
@@ -228,7 +242,7 @@ function BreakdownAssistant() {
           {loading ? 'Analysing…' : 'Get Diagnosis →'}
         </button>
       </div>
-      <ResultCard content={result} loading={loading} error={error} />
+      <ResultCard content={result} loading={loading} error={error} tool="breakdown" />
     </div>
   );
 }
@@ -377,7 +391,7 @@ function WarningLightDecoder() {
           {loading ? 'Decoding…' : 'Decode Warning →'}
         </button>
       </div>
-      <ResultCard content={result} loading={loading} error={error} />
+      <ResultCard content={result} loading={loading} error={error} tool="lights" />
     </div>
   );
 }
@@ -464,7 +478,7 @@ function ParkingFineAppeal() {
         </button>
       </div>
       <ResultCard
-        content={result} loading={loading} error={error} plain
+        content={result} loading={loading} error={error} plain tool="appeal"
         actions={result ? <CopyButton text={result} /> : null}
       />
     </div>
@@ -698,7 +712,7 @@ function FairPriceChecker() {
           </>
         )}
       </div>
-      <ResultCard content={result} loading={loading} error={error} />
+      <ResultCard content={result} loading={loading} error={error} tool="price" />
     </div>
   );
 }
