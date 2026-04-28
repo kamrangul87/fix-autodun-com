@@ -32,15 +32,20 @@ const LIGHTS = [
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-async function callClaude(messages, system) {
+async function callClaude(messages, system, opts = {}) {
   const res = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, system }),
+    body: JSON.stringify({ messages, system, ...opts }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data.content;
+}
+
+function isUrl(str) {
+  try { const u = new URL(str.trim()); return u.protocol === 'http:' || u.protocol === 'https:'; }
+  catch { return false; }
 }
 
 function toBase64(file) {
@@ -499,10 +504,17 @@ function FairPriceChecker() {
   const [result,  setResult]  = useState('');
   const [error,   setError]   = useState('');
 
+  const urlMode = isUrl(listing.trim());
+
   async function submit() {
     setLoading(true); setError(''); setResult('');
     try {
-      setResult(await callClaude([{ role: 'user', content: `Car listing:\n\n${listing}` }], SYS_PRICE));
+      if (urlMode) {
+        const prompt = `Please fetch and analyse this car listing: ${listing.trim()}\n\nThen provide your full price analysis verdict.`;
+        setResult(await callClaude([{ role: 'user', content: prompt }], SYS_PRICE, { useWebSearch: true }));
+      } else {
+        setResult(await callClaude([{ role: 'user', content: `Car listing:\n\n${listing}` }], SYS_PRICE));
+      }
     } catch (e) { setError(e.message || 'Something went wrong. Please try again.'); }
     finally { setLoading(false); }
   }
@@ -511,16 +523,23 @@ function FairPriceChecker() {
     <div>
       <div className="tool-header">
         <div className="tool-title">Fair Price Checker</div>
-        <div className="tool-desc">Paste any UK car listing. Get a verdict, red flags, and negotiation tips instantly.</div>
+        <div className="tool-desc">Paste any UK car listing text or an AutoTrader / eBay Motors URL.</div>
       </div>
       <div className="card">
         <div className="field">
-          <label className="field-label">Paste the Car Listing *</label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <label className="field-label">Listing Text or URL *</label>
+            {urlMode && (
+              <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 500 }}>
+                🌐 URL detected — will search live
+              </span>
+            )}
+          </div>
           <textarea className="textarea" style={{ minHeight: 180 }} value={listing} onChange={e => setListing(e.target.value)}
-            placeholder={`Paste the full listing text here — title, price, mileage, spec, seller description, anything.\n\nExample:\n2019 Ford Focus 1.0 EcoBoost ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995. One previous owner. Some light scratches on rear bumper. Cambelt done at 38k. Comes with 2 keys.`} />
+            placeholder={`Paste listing text OR an AutoTrader / eBay Motors URL\n\nExamples:\n• https://www.autotrader.co.uk/car-details/...\n• 2019 Ford Focus 1.0 EcoBoost ST-Line, 42,000 miles, FSH, MOT Jan 2026, £10,995…`} />
         </div>
-        <button className="btn btn-primary btn-full" onClick={submit} disabled={listing.trim().length < 20 || loading}>
-          {loading ? 'Checking…' : 'Check This Price →'}
+        <button className="btn btn-primary btn-full" onClick={submit} disabled={listing.trim().length < 10 || loading}>
+          {loading ? (urlMode ? 'Fetching listing…' : 'Checking…') : 'Check This Price →'}
         </button>
       </div>
       <ResultCard content={result} loading={loading} error={error} />
