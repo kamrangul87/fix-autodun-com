@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { marked } from 'marked';
 import { supabase } from './lib/supabase';
+
+marked.use({ breaks: true });
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -58,33 +61,9 @@ function toBase64(file) {
   });
 }
 
-function parseMd(raw) {
-  const lines = raw.split('\n');
-  const out   = [];
-  let buf     = [];
-
-  function flush() {
-    if (buf.length) { out.push(`<ul>${buf.join('')}</ul>`); buf = []; }
-  }
-  function inline(t) {
-    return t
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g,     '<em>$1</em>')
-      .replace(/`(.+?)`/g,       '<code>$1</code>');
-  }
-
-  for (const line of lines) {
-    const t = line.trim();
-    if (!t) { flush(); continue; }
-    if      (t.startsWith('### ')) { flush(); out.push(`<h3>${inline(t.slice(4))}</h3>`); }
-    else if (t.startsWith('## '))  { flush(); out.push(`<h2>${inline(t.slice(3))}</h2>`); }
-    else if (t.startsWith('# '))   { flush(); out.push(`<h2>${inline(t.slice(2))}</h2>`); }
-    else if (t.startsWith('- ') || t.startsWith('* ')) { buf.push(`<li>${inline(t.slice(2))}</li>`); }
-    else if (/^\d+\.\s/.test(t))   { buf.push(`<li>${inline(t.replace(/^\d+\.\s/, ''))}</li>`); }
-    else { flush(); out.push(`<p>${inline(t)}</p>`); }
-  }
-  flush();
-  return out.join('');
+function renderMd(content) {
+  const html = marked.parse(content);
+  return typeof html === 'string' ? html : String(html);
 }
 
 // ── Shared Components ──────────────────────────────────────────────────────
@@ -130,13 +109,19 @@ function ResultCard({ content, loading, error, plain, actions, tool }) {
   if (loading) return <div className="result-loading"><div className="spinner" /><span>Analysing…</span></div>;
   if (error)   return <div className="error-box">⚠️ {error}</div>;
   if (!content) return null;
+  const showDiagram = tool === 'breakdown' || tool === 'lights';
   return (
     <div className="result-card">
       <div className="result-body">
         {plain
           ? <pre className="letter-output">{content}</pre>
-          : <div dangerouslySetInnerHTML={{ __html: parseMd(content) }} />}
+          : <div dangerouslySetInnerHTML={{ __html: renderMd(content) }} />}
       </div>
+      {showDiagram && (
+        <div style={{ padding: '0 24px 20px' }}>
+          <CarDiagram result={content} />
+        </div>
+      )}
       {actions && <div className="result-actions">{actions}</div>}
       <FeedbackBar tool={tool} resultSummary={content} />
     </div>
@@ -154,6 +139,187 @@ function CopyButton({ text }) {
     <button className={`btn-copy ${copied ? 'copied' : ''}`} onClick={copy}>
       {copied ? '✓ Copied' : '📋 Copy Letter'}
     </button>
+  );
+}
+
+// ── Car Diagram ────────────────────────────────────────────────────────────
+
+const AREAS = [
+  {
+    id: 'engine', label: 'Engine Bay', short: 'EN', cx: 85, cy: 118,
+    desc: 'Under the bonnet at the front of the vehicle. Pull the bonnet release (usually on the driver\'s side footwell) to access.',
+    keys: ['engine','timing belt','timing chain','head gasket','coolant','radiator','alternator','starter motor','thermostat','turbo','spark plug','throttle body','camshaft','valve','piston','cylinder','compression','overheating','serpentine belt','water pump','crankshaft'],
+  },
+  {
+    id: 'battery', label: 'Battery', short: 'BA', cx: 62, cy: 133,
+    desc: 'Usually in the engine bay on one side. Some cars (BMW, Porsche) have the battery in the boot or under the rear seat.',
+    keys: ['battery','charging system','jump start','dead battery','flat battery','alternator charge','12v','voltage drop','parasitic drain'],
+  },
+  {
+    id: 'dashboard', label: 'Dashboard', short: 'DI', cx: 212, cy: 82,
+    desc: 'Behind the steering wheel inside the cabin. The ECU, fuse box, and electronic control modules connect through this area.',
+    keys: ['warning light','dashboard','instrument cluster','airbag','srs','ecu','fuse','relay','electrical fault','central locking','check engine','obd','fault code','p0','p1','b0','c0','u0','abs sensor','traction control'],
+  },
+  {
+    id: 'steering', label: 'Steering', short: 'ST', cx: 183, cy: 104,
+    desc: 'The steering rack runs across the front subframe; the column runs through the cabin floor to the wheel.',
+    keys: ['steering','power steering','rack','tie rod','track rod','eps','electric power steering','pull to one side','steering vibration','alignment','toe','camber','steering fluid'],
+  },
+  {
+    id: 'fuel', label: 'Fuel System', short: 'FU', cx: 255, cy: 122,
+    desc: 'The fuel tank sits under the rear floor. The fuel pump is typically inside the tank, accessible through the boot floor panel.',
+    keys: ['fuel','fuel pump','fuel injector','fuel filter','fuel tank','fuel pressure','dpf','diesel particulate','fuel economy','misfuel','fuel smell','low fuel'],
+  },
+  {
+    id: 'brakes', label: 'Wheels / Brakes', short: 'BR', cx: 103, cy: 163,
+    desc: 'Brake discs and pads sit inside each wheel. Look through the wheel spokes — the disc should appear silver, not deeply grooved.',
+    keys: ['brake','brake pad','brake disc','caliper','abs','tyre','tpms','tyre pressure','wheel bearing','squealing','grinding','brake fluid','handbrake','parking brake','pulling when braking'],
+  },
+  {
+    id: 'exhaust', label: 'Exhaust', short: 'EX', cx: 390, cy: 138,
+    desc: 'Runs from the exhaust manifold at the engine, under the car, to the tailpipe at the rear. The catalytic converter is roughly under the front seats.',
+    keys: ['exhaust','catalytic converter','cat converter','dpf filter','silencer','manifold','exhaust smoke','blowing exhaust','rattling underneath','rattling exhaust','emissions','lambda sensor','oxygen sensor'],
+  },
+  {
+    id: 'suspension', label: 'Suspension', short: 'SU', cx: 122, cy: 146,
+    desc: 'At each wheel corner under the wheel arch. You\'ll see the shock absorber (damper) and coil spring when looking inside the arch.',
+    keys: ['suspension','shock absorber','damper','strut','coil spring','wishbone','ball joint','cv joint','axle','knocking over bumps','bouncy ride','ride height','sway bar','anti-roll bar','pothole damage'],
+  },
+];
+
+function detectArea(text) {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  let best = null, bestScore = 0;
+  for (const a of AREAS) {
+    const score = a.keys.filter(k => lower.includes(k)).length;
+    if (score > bestScore) { bestScore = score; best = a.id; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function LabelCallout({ cx, cy, label }) {
+  const w = Math.ceil(label.length * 6.5 + 14);
+  const h = 18;
+  const lx = Math.max(w / 2 + 3, Math.min(457 - w / 2, cx));
+  const ly = Math.max(h / 2 + 3, cy - 34);
+  return (
+    <g pointerEvents="none">
+      <line x1={cx} y1={cy - 13} x2={lx} y2={ly + h / 2 + 1}
+        stroke="#00d48a" strokeWidth="1.5" strokeDasharray="3 2" />
+      <rect x={lx - w / 2} y={ly - h / 2} width={w} height={h} rx="4"
+        fill="#001f12" stroke="#00d48a" strokeWidth="1.2" />
+      <text x={lx} y={ly + 4} textAnchor="middle" fontSize="10" fontWeight="700"
+        fill="#00d48a" style={{ fontFamily: 'inherit' }}>
+        {label}
+      </text>
+    </g>
+  );
+}
+
+function CarDiagram({ result }) {
+  const [active, setActive] = useState(() => detectArea(result));
+  useEffect(() => { setActive(detectArea(result)); }, [result]);
+  const activeArea = AREAS.find(a => a.id === active);
+
+  return (
+    <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+      <div className="section-label" style={{ marginBottom: 10 }}>📍 Where is this part?</div>
+      <div style={{ background: '#0a1828', borderRadius: 10, padding: '14px 8px', marginBottom: 10, overflowX: 'auto' }}>
+        <svg viewBox="0 0 460 195"
+          style={{ display: 'block', width: '100%', maxWidth: 460, margin: '0 auto', minWidth: 280 }}>
+
+          {/* Ground shadow */}
+          <ellipse cx="228" cy="192" rx="190" ry="4" fill="rgba(0,0,0,0.35)" />
+
+          {/* Car body */}
+          <path d="M48,152 L48,128 L62,116 L100,108 L165,106 L196,72 L218,64 L298,64 L330,72 L362,106 L404,112 L426,128 L426,152 Z"
+            fill="#0d1d30" stroke="#1e3452" strokeWidth="2" strokeLinejoin="round" />
+
+          {/* Windscreen */}
+          <path d="M165,106 L196,72 L222,64 L222,106 Z" fill="#0a1f36" stroke="#1e3452" strokeWidth="1" />
+
+          {/* Rear window */}
+          <path d="M295,64 L330,72 L336,106 L295,106 Z" fill="#0a1f36" stroke="#1e3452" strokeWidth="1" />
+
+          {/* Door lines */}
+          <line x1="222" y1="64" x2="222" y2="106" stroke="#1e3452" strokeWidth="1" />
+          <line x1="295" y1="64" x2="295" y2="106" stroke="#1e3452" strokeWidth="1" />
+          <line x1="222" y1="106" x2="295" y2="106" stroke="#1e3452" strokeWidth="1" />
+
+          {/* Headlight */}
+          <rect x="46" y="119" width="8" height="14" rx="2" fill="#1a3050" stroke="#2a4d70" strokeWidth="1" />
+
+          {/* Taillight */}
+          <rect x="425" y="120" width="5" height="16" rx="1" fill="#1a0010" stroke="#2a001a" strokeWidth="1" />
+
+          {/* Front wheel */}
+          <circle cx="103" cy="163" r="27" fill="#0a1828" stroke="#1e3452" strokeWidth="2" />
+          <circle cx="103" cy="163" r="15" fill="#070f1a" stroke="#162842" strokeWidth="1.5" />
+          <circle cx="103" cy="163" r="4"  fill="#0d1d30" />
+
+          {/* Rear wheel */}
+          <circle cx="354" cy="163" r="27" fill="#0a1828" stroke="#1e3452" strokeWidth="2" />
+          <circle cx="354" cy="163" r="15" fill="#070f1a" stroke="#162842" strokeWidth="1.5" />
+          <circle cx="354" cy="163" r="4"  fill="#0d1d30" />
+
+          {/* Hotspots */}
+          {AREAS.map(area => {
+            const isActive = active === area.id;
+            return (
+              <g key={area.id} onClick={() => setActive(isActive ? null : area.id)}
+                style={{ cursor: 'pointer' }}>
+                {isActive && (
+                  <circle cx={area.cx} cy={area.cy} r={18}
+                    fill="rgba(0,212,138,0.12)" />
+                )}
+                <circle cx={area.cx} cy={area.cy} r={12}
+                  fill={isActive ? 'rgba(0,212,138,0.2)' : '#111f33'}
+                  stroke={isActive ? '#00d48a' : '#2a4d70'}
+                  strokeWidth={isActive ? 2 : 1.5}
+                  style={{ transition: 'all 0.15s' }}
+                />
+                <text x={area.cx} y={area.cy + 4} textAnchor="middle"
+                  fontSize="8.5" fontWeight="600"
+                  fill={isActive ? '#00d48a' : '#3d5a78'}
+                  style={{ fontFamily: 'inherit', userSelect: 'none', pointerEvents: 'none' }}>
+                  {area.short}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Label callout for active hotspot */}
+          {activeArea && (
+            <LabelCallout cx={activeArea.cx} cy={activeArea.cy} label={activeArea.label} />
+          )}
+        </svg>
+      </div>
+
+      {activeArea ? (
+        <div style={{
+          padding: '12px 16px',
+          background: 'rgba(0,212,138,0.06)',
+          border: '1px solid rgba(0,212,138,0.18)',
+          borderRadius: 10,
+          fontSize: 14,
+          lineHeight: 1.65,
+        }}>
+          <div style={{ fontWeight: 600, color: 'var(--green)', marginBottom: 5 }}>
+            {activeArea.label}
+          </div>
+          <div style={{ color: 'var(--muted2)' }}>
+            This part is in the{' '}
+            <strong style={{ color: 'var(--text)' }}>{activeArea.label.toLowerCase()}</strong>
+            {' '}of your vehicle. {activeArea.desc}
+          </div>
+        </div>
+      ) : (
+        <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 13, padding: '4px 0' }}>
+          Tap a hotspot on the diagram to see its location
+        </p>
+      )}
+    </div>
   );
 }
 

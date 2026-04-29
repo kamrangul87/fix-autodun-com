@@ -591,6 +591,42 @@ input, textarea, select { font-family: inherit; }
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
+.result-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+  font-size: 13.5px;
+}
+
+.result-body th,
+.result-body td {
+  padding: 9px 13px;
+  text-align: left;
+  border: 1px solid var(--border);
+  line-height: 1.45;
+}
+
+.result-body th {
+  background: var(--card2);
+  color: var(--muted2);
+  font-weight: 600;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.result-body tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.result-body blockquote {
+  border-left: 3px solid var(--border2);
+  padding-left: 14px;
+  color: var(--muted2);
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
 /* ── Loading Spinner ────────────────────────────────────── */
 
 .result-loading {
